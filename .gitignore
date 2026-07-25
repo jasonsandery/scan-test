@@ -1,0 +1,5 @@
+duplicate_state.db
+duplicate_state.db-*
+node_modules/
+test-photos*/
+

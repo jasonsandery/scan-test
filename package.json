@@ -1,0 +1,18 @@
+{
+  "name": "photo-duplicate-local",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "commander": "^11.0.0",
+    "jimp": "^1.6.1"
+  },
+  "scripts": {
+    "scan": "node src/index.js scan",
+    "report": "node src/index.js report",
+    "prune": "node src/index.js prune",
+    "rollback": "node src/index.js rollback",
+    "runs": "node src/index.js runs",
+    "status": "node src/index.js status"
+  }
+}
