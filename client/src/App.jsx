@@ -118,6 +118,9 @@ export default function App() {
         unchanged: 0,
         failed: 0,
         warned: 0,
+        elapsedMs: 0,
+        filesPerSecond: null,
+        etaSeconds: null,
       });
     } catch (err) {
       setError(err.message);

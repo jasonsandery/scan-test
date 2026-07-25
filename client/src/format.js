@@ -36,6 +36,25 @@ export function formatRelativeTime(isoString) {
   return `${diffDay}d ago`;
 }
 
+export function formatDuration(totalSeconds) {
+  if (totalSeconds == null || !Number.isFinite(totalSeconds) || totalSeconds < 0) {
+    return null;
+  }
+  if (totalSeconds < 1) {
+    return "<1s";
+  }
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
 export function formatDimensions(item) {
   if (!item?.width || !item?.height) {
     return "unknown size";

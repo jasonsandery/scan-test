@@ -29,6 +29,25 @@ import {
 
 const program = new Command();
 
+function formatDuration(totalSeconds) {
+  if (totalSeconds == null || !Number.isFinite(totalSeconds) || totalSeconds < 0) {
+    return null;
+  }
+  if (totalSeconds < 1) {
+    return "<1s";
+  }
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
 // Wires the scan up to whatever control surface the current process
 // (interactive terminal vs. piped/CI) supports. Kept separate from
 // ScanController so a future HTTP backend can drive the same controller from
@@ -119,23 +138,28 @@ async function scanDataset(datasetName, rootPath, options) {
 
   controller.on("progress", (status) => {
     const suffix = status.state === "paused" ? " [paused - press p to resume]" : "...";
-    process.stdout.write(
-      `Processed ${status.processed}/${status.total} (hashed ${status.hashed}, unchanged ${status.unchanged}, warned ${status.warned}, failed ${status.failed})${suffix}\r`
-    );
+    const eta = formatDuration(status.etaSeconds);
+    const etaText = eta ? ` - ~${eta} remaining` : "";
+    const line = `Processed ${status.processed}/${status.total} (hashed ${status.hashed}, unchanged ${status.unchanged}, warned ${status.warned}, failed ${status.failed})${etaText}${suffix}`;
+    // Padded so a shorter line (e.g. once the ETA disappears) fully overwrites
+    // a longer previous one instead of leaving stray trailing characters.
+    process.stdout.write(`${line.padEnd(110)}\r`);
   });
 
   registerScanControls(controller);
   const finalStatus = await controller.run();
+  const elapsed = formatDuration(finalStatus.elapsedMs / 1000);
+  const elapsedText = elapsed ? ` in ${elapsed}` : "";
 
   console.log("");
   if (finalStatus.state === "stopped") {
     console.log(
-      `Scan stopped at ${finalStatus.processed}/${finalStatus.total} (${finalStatus.hashed} hashed, ${finalStatus.unchanged} unchanged, ${finalStatus.warned} warned, ${finalStatus.failed} failed).`
+      `Scan stopped at ${finalStatus.processed}/${finalStatus.total} (${finalStatus.hashed} hashed, ${finalStatus.unchanged} unchanged, ${finalStatus.warned} warned, ${finalStatus.failed} failed)${elapsedText}.`
     );
     console.log(`Re-run scan for '${datasetName}' to continue - already-processed files are skipped automatically.`);
   } else {
     console.log(
-      `Scan complete. ${finalStatus.total} images found for dataset '${datasetName}': ${finalStatus.hashed} hashed, ${finalStatus.unchanged} unchanged, ${finalStatus.warned} warned (indexed but not perceptually hashed), ${finalStatus.failed} failed.`
+      `Scan complete. ${finalStatus.total} images found for dataset '${datasetName}': ${finalStatus.hashed} hashed, ${finalStatus.unchanged} unchanged, ${finalStatus.warned} warned (indexed but not perceptually hashed), ${finalStatus.failed} failed${elapsedText}.`
     );
   }
   console.log(`Database file: ${dbPath}`);

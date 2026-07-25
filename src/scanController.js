@@ -27,6 +27,10 @@ export class ScanController extends EventEmitter {
     this.state = "idle"; // idle | running | paused | stopping | stopped | completed
     this._stopRequested = false;
     this._resumeWaiter = null;
+    // Tracks time spent actively processing, excluding paused periods, so a
+    // long pause doesn't make the rate/ETA look artificially slow.
+    this._accumulatedActiveMs = 0;
+    this._activeStartedAt = null;
   }
 
   get total() {
@@ -34,6 +38,16 @@ export class ScanController extends EventEmitter {
   }
 
   getStatus() {
+    const liveDelta = this.state === "running" && this._activeStartedAt ? Date.now() - this._activeStartedAt : 0;
+    const activeElapsedMs = this._accumulatedActiveMs + liveDelta;
+
+    // Require a small minimum of real data before trusting the rate - a
+    // rate computed from the first file or two is too noisy to be useful.
+    const hasEnoughData = this.cursor > 0 && activeElapsedMs > 500;
+    const filesPerSecond = hasEnoughData ? this.cursor / (activeElapsedMs / 1000) : null;
+    const remaining = this.total - this.cursor;
+    const etaSeconds = filesPerSecond && filesPerSecond > 0 ? remaining / filesPerSecond : null;
+
     return {
       state: this.state,
       processed: this.cursor,
@@ -42,6 +56,9 @@ export class ScanController extends EventEmitter {
       unchanged: this.counts.unchanged,
       failed: this.counts.failed,
       warned: this.counts.warned,
+      elapsedMs: activeElapsedMs,
+      filesPerSecond,
+      etaSeconds,
     };
   }
 
@@ -49,6 +66,8 @@ export class ScanController extends EventEmitter {
     if (this.state !== "running") {
       return false;
     }
+    this._accumulatedActiveMs += Date.now() - this._activeStartedAt;
+    this._activeStartedAt = null;
     this.state = "paused";
     this.emit("status", this.getStatus());
     return true;
@@ -59,6 +78,7 @@ export class ScanController extends EventEmitter {
       return false;
     }
     this.state = "running";
+    this._activeStartedAt = Date.now();
     const waiter = this._resumeWaiter;
     this._resumeWaiter = null;
     if (waiter) {
@@ -94,6 +114,7 @@ export class ScanController extends EventEmitter {
 
   async run() {
     this.state = "running";
+    this._activeStartedAt = Date.now();
     this.emit("status", this.getStatus());
 
     while (this.cursor < this.total) {
@@ -137,6 +158,11 @@ export class ScanController extends EventEmitter {
 
       this.cursor += wave.length;
       this.emit("progress", this.getStatus());
+    }
+
+    if (this._activeStartedAt) {
+      this._accumulatedActiveMs += Date.now() - this._activeStartedAt;
+      this._activeStartedAt = null;
     }
 
     if (this._stopRequested) {

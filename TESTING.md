@@ -86,6 +86,30 @@ completed "waves" are present, the in-flight wave's photos simply aren't
 (process ID killed directly) - `status` afterward showed exactly 609
 cleanly-committed photos, no errors on reopening the database.
 
+### 1.9 Progress indicator shows count and a time estimate, excluding
+paused time
+**Test (CLI):** watch the progress line during a scan; check the final
+summary line.
+**Test (GUI):** watch the scan footer's progress bar/text during a scan,
+including through a pause/resume cycle.
+**Expected:** both show `processed/total` throughout; once enough data
+exists (500ms of active processing), an ETA appears (`~Xm Ys remaining`
+in the CLI, `~Xm Ys left` in the GUI); the ETA is hidden while paused
+(showing a stale estimate during a pause would be actively misleading);
+resuming recalculates it; the final line shows total elapsed time; a long
+pause does not inflate the ETA (the rate calculation only counts active
+processing time, not wall-clock time).
+**Validated with:** a programmatic `ScanController` test isolating the
+core invariant - `elapsedMs` read immediately before `pause()` and again
+after a full 1-second paused wait were identical (616ms both times, no
+inflation), then grew again after `resume()`. Then for real: the full
+2m55s real-library scan showed a live, converging ETA throughout the CLI
+run and the correct `in 2m 55s` on the final summary line; in the GUI,
+Playwright-driven against a live scan showed `~1m 15s left` while
+running, confirmed the ETA text disappears entirely while paused (`4% ·
+200 / 4,904 · 200 hashed...` with no "left" segment), and reappears with
+a fresh estimate after resuming.
+
 ## 2. Duplicate detection
 
 ### 2.1 Exact duplicates (byte-identical, any name/location)

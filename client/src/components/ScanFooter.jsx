@@ -1,3 +1,5 @@
+import { formatDuration } from "../format.js";
+
 export default function ScanFooter({ job, onPause, onResume, onStop }) {
   if (!job) {
     return null;
@@ -7,6 +9,7 @@ export default function ScanFooter({ job, onPause, onResume, onStop }) {
   const pct = status.total > 0 ? Math.round((status.processed / status.total) * 100) : 0;
   const isPaused = status.state === "paused";
   const isStopping = status.state === "stopping";
+  const eta = formatDuration(status.etaSeconds);
 
   return (
     <div className="scan-footer">
@@ -18,8 +21,8 @@ export default function ScanFooter({ job, onPause, onResume, onStop }) {
         <div className="scan-fill" style={{ width: `${pct}%` }} />
       </div>
       <span className="scan-counts">
-        {status.processed.toLocaleString()} / {status.total.toLocaleString()} · {status.hashed} hashed ·{" "}
-        {status.unchanged} unchanged
+        {pct}% · {status.processed.toLocaleString()} / {status.total.toLocaleString()}
+        {eta && !isPaused ? ` · ~${eta} left` : ""} · {status.hashed} hashed · {status.unchanged} unchanged
         {status.warned > 0 ? ` · ${status.warned} no preview` : ""} · {status.failed} failed
       </span>
       <div style={{ display: "flex", gap: 6 }}>
