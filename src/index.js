@@ -112,6 +112,11 @@ async function scanDataset(datasetName, rootPath, options) {
     console.warn(`Skipping unreadable image: ${result.relativePath} (${result.error.message})`);
   });
 
+  controller.on("fileWarning", (result) => {
+    process.stdout.write("\n");
+    console.warn(`Indexed but couldn't perceptually hash (likely corrupted): ${result.relativePath} (${result.metadataWarning})`);
+  });
+
   controller.on("progress", (status) => {
     const suffix = status.state === "paused" ? " [paused - press p to resume]" : "...";
     process.stdout.write(
@@ -143,7 +148,8 @@ function formatGroup(group, index) {
   lines.push(`Group ${index + 1}: keep ${group.keep.relativePath}`);
   lines.push(`  duplicates:`);
   group.duplicates.forEach((item) => {
-    lines.push(`    - ${item.relativePath} (${item.size} bytes, ${item.width}x${item.height}, modified ${new Date(item.mtimeMs).toISOString()})`);
+    const dimensions = item.width && item.height ? `${item.width}x${item.height}` : "dimensions unknown";
+    lines.push(`    - ${item.relativePath} (${item.size} bytes, ${dimensions}, modified ${new Date(item.mtimeMs).toISOString()})`);
   });
   return lines.join("\n");
 }

@@ -124,6 +124,12 @@ export class ScanController extends EventEmitter {
           }
           upsertPhotoRecord(this.db, this.dataset.id, { ...result, lastSeenAt: now });
           this.counts.hashed += 1;
+          if (result.metadataWarning) {
+            // Recorded successfully (exact-duplicate detection still works
+            // via its SHA256) but couldn't be perceptually hashed - commonly
+            // a genuinely corrupted/truncated image file.
+            this.emit("fileWarning", result);
+          }
         }
       });
 

@@ -141,6 +141,8 @@ export function createRouter(db) {
     const onProgress = (status) => sendSse(res, "progress", status);
     const onFileError = (result) =>
       sendSse(res, "fileError", { relativePath: result.relativePath, message: result.error?.message });
+    const onFileWarning = (result) =>
+      sendSse(res, "fileWarning", { relativePath: result.relativePath, message: result.metadataWarning });
     const onStatus = (status) => {
       sendSse(res, "status", status);
       if (status.state === "completed" || status.state === "stopped") {
@@ -153,11 +155,13 @@ export function createRouter(db) {
       job.controller.off("progress", onProgress);
       job.controller.off("status", onStatus);
       job.controller.off("fileError", onFileError);
+      job.controller.off("fileWarning", onFileWarning);
     }
 
     job.controller.on("progress", onProgress);
     job.controller.on("status", onStatus);
     job.controller.on("fileError", onFileError);
+    job.controller.on("fileWarning", onFileWarning);
     req.on("close", cleanup);
   });
 

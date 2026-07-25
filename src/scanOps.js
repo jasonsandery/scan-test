@@ -1,6 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { computeFileHash, computeImageMetadata, buildDuplicateGroups, isSupportedImage } from "./duplicateService.js";
+import {
+  computeFileHash,
+  computeImageMetadata,
+  buildDuplicateGroups,
+  isSupportedImage,
+  isCurrentHashFormat,
+} from "./duplicateService.js";
 import { getPhotosByDataset } from "./db.js";
 
 // Shared, side-effect-free (beyond real filesystem I/O) operations used by
@@ -71,27 +77,55 @@ export async function processImageFile(absolutePath, relativePath, existingByPat
     return { relativePath, absolutePath, error };
   }
 
+  // A stale-format hash (e.g. from before a hashing-algorithm change) is
+  // never treated as "unchanged" - this self-heals older datasets on their
+  // next scan instead of silently comparing incompatible hash formats.
   const existing = existingByPath.get(relativePath);
-  if (!force && existing && existing.size === stats.size && existing.mtime_ms === stats.mtimeMs) {
+  if (
+    !force &&
+    existing &&
+    existing.size === stats.size &&
+    existing.mtime_ms === stats.mtimeMs &&
+    isCurrentHashFormat(existing.phash)
+  ) {
     return { relativePath, absolutePath, unchanged: true, photoId: existing.id };
   }
 
+  let sha256;
   try {
-    const sha256 = await computeFileHash(absolutePath);
-    const metadata = await computeImageMetadata(absolutePath);
-    return {
-      relativePath,
-      absolutePath,
-      size: stats.size,
-      mtimeMs: stats.mtimeMs,
-      sha256,
-      width: metadata.width,
-      height: metadata.height,
-      pHash: metadata.pHash,
-    };
+    sha256 = await computeFileHash(absolutePath);
   } catch (error) {
     return { relativePath, absolutePath, error };
   }
+
+  // Perceptual hashing needs a full image decode, which can fail on a
+  // genuinely corrupted/truncated file even though its raw bytes hash fine.
+  // Don't let that discard the SHA256 - the file still gets recorded (and
+  // still gets exact-duplicate detection), just without a phash.
+  let width = null;
+  let height = null;
+  let pHash = null;
+  let metadataWarning = null;
+  try {
+    const metadata = await computeImageMetadata(absolutePath);
+    width = metadata.width;
+    height = metadata.height;
+    pHash = metadata.pHash;
+  } catch (error) {
+    metadataWarning = error.message;
+  }
+
+  return {
+    relativePath,
+    absolutePath,
+    size: stats.size,
+    mtimeMs: stats.mtimeMs,
+    sha256,
+    width,
+    height,
+    pHash,
+    metadataWarning,
+  };
 }
 
 export function loadActiveDuplicateGroups(db, datasetId) {

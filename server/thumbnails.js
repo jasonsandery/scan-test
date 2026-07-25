@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { Jimp, JimpMime } from "jimp";
 import { getPhotoById } from "../src/db.js";
 
@@ -7,12 +8,25 @@ import { getPhotoById } from "../src/db.js";
 const CACHE_LIMIT = 300;
 const cache = new Map();
 
-function rememberInCache(key, buffer) {
-  cache.set(key, buffer);
+function rememberInCache(key, value) {
+  cache.set(key, value);
   if (cache.size > CACHE_LIMIT) {
     const oldestKey = cache.keys().next().value;
     cache.delete(oldestKey);
   }
+}
+
+async function renderWithSharp(sourcePath, size) {
+  const buffer = await sharp(sourcePath).resize(size, size, { fit: "cover" }).jpeg().toBuffer();
+  return { buffer, contentType: "image/jpeg" };
+}
+
+// BMP only - sharp cannot decode BMP at all (see duplicateService.js).
+async function renderWithJimp(sourcePath, size) {
+  const image = await Jimp.read(sourcePath);
+  image.cover({ w: size, h: size });
+  const buffer = await image.getBuffer(JimpMime.jpeg);
+  return { buffer, contentType: JimpMime.jpeg };
 }
 
 // Returns { buffer, contentType } or null if the photo id doesn't exist.
@@ -31,10 +45,9 @@ export async function renderThumbnail(db, photoId, size) {
     return cached;
   }
 
-  const image = await Jimp.read(sourcePath);
-  image.cover({ w: size, h: size });
-  const buffer = await image.getBuffer(JimpMime.jpeg);
-  const result = { buffer, contentType: JimpMime.jpeg };
+  const result = sourcePath.toLowerCase().endsWith(".bmp")
+    ? await renderWithJimp(sourcePath, size)
+    : await renderWithSharp(sourcePath, size);
   rememberInCache(key, result);
   return result;
 }

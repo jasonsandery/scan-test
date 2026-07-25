@@ -52,12 +52,32 @@ npm install
 
 ## How duplicates are detected
 
-- **Exact duplicates** — SHA256 content hash, any filename/location.
-- **Near duplicates** — a perceptual hash (Jimp) catches the same photo
-  saved under a different name, resized, or re-encoded, even with a
-  different file size or dimensions.
+- **Exact duplicates** — SHA256 content hash, any filename/location. Computed
+  from raw file bytes, so this works even for a photo that can't be decoded
+  as an image (see below).
+- **Near duplicates** — a perceptual hash (dHash, computed via
+  [sharp](https://sharp.pixelplumbing.com/)/libvips for every format except
+  BMP, which sharp can't decode at all and falls back to Jimp) catches the
+  same photo saved under a different name, resized, or re-encoded, even with
+  a different file size, dimensions, or orientation.
 - Within each group, the keeper is the copy with the highest resolution,
   then largest file size, then most recently modified.
+- A file that can't be decoded at all (genuinely corrupted/truncated - this
+  turned up more often than you'd expect testing against a real ~5,000-photo
+  library, where a native decoder failing to read a file is a strong signal
+  the file itself is damaged, not a bug) is still indexed and still gets
+  exact-duplicate detection; it just can't be perceptually hashed, and a
+  warning is logged when this happens.
+
+## Performance
+
+Validated against a real ~4,900-photo library (~13 GB, mixed iPhone/Canon
+JPEGs): full scan in ~85 seconds. An earlier Jimp-only implementation (pure
+JS JPEG decoding) took over an hour for the same library and silently
+excluded roughly a third of the files from all duplicate detection because a
+perceptual-hash failure discarded the already-computed SHA256 too - both are
+fixed now (sharp's native decoder, and hashing/exact-match no longer
+depend on the perceptual-hash step succeeding).
 
 ## Multiple datasets
 

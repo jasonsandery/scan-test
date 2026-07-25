@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { Jimp, compareHashes } from "jimp";
+import sharp from "sharp";
+import { Jimp } from "jimp";
 
 export const supportedExtensions = [
   ".jpg",
@@ -12,12 +13,6 @@ export const supportedExtensions = [
   ".tiff",
   ".tif"
 ];
-
-// compareHashes returns 0 (identical) .. 1 (unrelated); 0.1 reliably separates
-// resized/re-encoded copies of the same photo from genuinely different photos
-// (see local smoke test: same-image-resized scored 0, different-image scored 0.09+).
-const DEFAULT_NEAR_DUP_THRESHOLD = 0.1;
-const DEFAULT_COMPARISON_WINDOW = 8;
 
 export function isSupportedImage(filePath) {
   const lower = filePath.toLowerCase();
@@ -34,14 +29,110 @@ export async function computeFileHash(filePath) {
   });
 }
 
-export async function computeImageMetadata(filePath) {
-  const image = await Jimp.read(filePath);
+// --- Perceptual hash (dHash) --------------------------------------------
+//
+// sharp (native libjpeg-turbo/libvips) decodes everything except BMP, which
+// it doesn't support at all - Jimp (pure JS) covers that one format. Both
+// paths reduce down to the same small grayscale pixel grid and run through
+// the SAME hash function below, so hashes stay comparable across formats -
+// a BMP and a JPEG of the same photo still land in the same duplicate group.
+//
+// Versioned (HASH_VERSION prefix) so a change to this algorithm can't
+// silently compare old- and new-format hashes against each other: a stale
+// hash just never matches (see isCurrentHashFormat / hammingDistance).
+export const HASH_VERSION = "dh1";
+const HASH_GRID_WIDTH = 9;
+const HASH_GRID_HEIGHT = 8;
+
+const NIBBLE_POPCOUNT = [0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4];
+
+function dHashFromGrayscale(buffer, width, height) {
+  const bits = [];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width - 1; x += 1) {
+      bits.push(buffer[y * width + x] < buffer[y * width + x + 1] ? 1 : 0);
+    }
+  }
+  const bytes = Buffer.alloc(Math.ceil(bits.length / 8));
+  bits.forEach((bit, index) => {
+    if (bit) {
+      bytes[index >> 3] |= 1 << (7 - (index % 8));
+    }
+  });
+  return bytes.toString("hex");
+}
+
+async function computeHashViaSharp(filePath) {
+  const image = sharp(filePath);
+  const metadata = await image.metadata();
+  const gray = await image
+    .clone()
+    .resize(HASH_GRID_WIDTH, HASH_GRID_HEIGHT, { fit: "fill" })
+    .grayscale()
+    .raw()
+    .toBuffer();
   return {
-    width: image.bitmap.width,
-    height: image.bitmap.height,
-    pHash: image.hash(),
+    width: metadata.width,
+    height: metadata.height,
+    pHash: `${HASH_VERSION}:${dHashFromGrayscale(gray, HASH_GRID_WIDTH, HASH_GRID_HEIGHT)}`,
   };
 }
+
+// BMP only - sharp cannot decode BMP at all.
+async function computeHashViaJimp(filePath) {
+  const image = await Jimp.read(filePath);
+  const width = image.bitmap.width;
+  const height = image.bitmap.height;
+  const resized = image.clone().resize({ w: HASH_GRID_WIDTH, h: HASH_GRID_HEIGHT }).greyscale();
+
+  const gray = Buffer.alloc(HASH_GRID_WIDTH * HASH_GRID_HEIGHT);
+  for (let i = 0; i < gray.length; i += 1) {
+    gray[i] = resized.bitmap.data[i * 4]; // RGBA -> R (R=G=B post-greyscale)
+  }
+
+  return {
+    width,
+    height,
+    pHash: `${HASH_VERSION}:${dHashFromGrayscale(gray, HASH_GRID_WIDTH, HASH_GRID_HEIGHT)}`,
+  };
+}
+
+export async function computeImageMetadata(filePath) {
+  if (filePath.toLowerCase().endsWith(".bmp")) {
+    return computeHashViaJimp(filePath);
+  }
+  return computeHashViaSharp(filePath);
+}
+
+export function isCurrentHashFormat(phash) {
+  return typeof phash === "string" && phash.startsWith(`${HASH_VERSION}:`);
+}
+
+// Hamming distance in bits (0-64). Returns Infinity for missing/stale-format
+// hashes so they simply never match anything, rather than being compared
+// against a different algorithm's output.
+export function hammingDistance(phashA, phashB) {
+  if (!isCurrentHashFormat(phashA) || !isCurrentHashFormat(phashB)) {
+    return Infinity;
+  }
+  const hexA = phashA.slice(HASH_VERSION.length + 1);
+  const hexB = phashB.slice(HASH_VERSION.length + 1);
+  if (hexA.length !== hexB.length) {
+    return Infinity;
+  }
+  let distance = 0;
+  for (let i = 0; i < hexA.length; i += 1) {
+    distance += NIBBLE_POPCOUNT[parseInt(hexA[i], 16) ^ parseInt(hexB[i], 16)];
+  }
+  return distance;
+}
+
+// --- Duplicate grouping ---------------------------------------------------
+
+// Hamming distance is an integer 0-64 for a 64-bit dHash; empirically
+// calibrated (see local smoke tests) against both synthetic and real photos.
+const DEFAULT_NEAR_DUP_THRESHOLD = 10;
+const DEFAULT_COMPARISON_WINDOW = 8;
 
 export function compareCandidates(a, b) {
   const pixelsA = (a.width || 0) * (a.height || 0);
@@ -106,11 +197,11 @@ export function buildDuplicateGroups(items, options = {}) {
     }
   });
 
-  const withHash = items.filter((item) => item.phash);
+  const withHash = items.filter((item) => isCurrentHashFormat(item.phash));
   const sorted = [...withHash].sort((a, b) => (a.phash < b.phash ? -1 : a.phash > b.phash ? 1 : 0));
   for (let i = 0; i < sorted.length; i += 1) {
     for (let j = i + 1; j < Math.min(sorted.length, i + 1 + window); j += 1) {
-      const distance = compareHashes(sorted[i].phash, sorted[j].phash);
+      const distance = hammingDistance(sorted[i].phash, sorted[j].phash);
       if (distance <= threshold) {
         union(sorted[i].id, sorted[j].id);
       }
