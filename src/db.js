@@ -67,6 +67,10 @@ export function getDataset(db, datasetName) {
   return db.conn.prepare("SELECT * FROM datasets WHERE name = ?").get(datasetName) ?? null;
 }
 
+export function listDatasets(db) {
+  return db.conn.prepare("SELECT * FROM datasets ORDER BY name").all();
+}
+
 export function createOrUpdateDataset(db, datasetName, rootPath, archiveRoot) {
   const existing = getDataset(db, datasetName);
   const now = new Date().toISOString();
@@ -151,6 +155,10 @@ export function touchLastSeen(db, photoId, absolutePath, lastSeenAt) {
 
 export function getPhotosByDataset(db, datasetId) {
   return db.conn.prepare("SELECT * FROM photos WHERE dataset_id = ? ORDER BY relative_path").all(datasetId);
+}
+
+export function getPhotoById(db, photoId) {
+  return db.conn.prepare("SELECT * FROM photos WHERE id = ?").get(photoId) ?? null;
 }
 
 export function setPhotoArchived(db, photoId, archivePath) {

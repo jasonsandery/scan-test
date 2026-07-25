@@ -1,4 +1,3 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 import { Command } from "commander";
@@ -8,14 +7,9 @@ import {
   closeDatabase,
   createOrUpdateDataset,
   getDataset,
-  getPhotoByRelativePath,
-  upsertPhotoRecord,
-  touchLastSeen,
-  setDatasetLastScan,
-  getPhotosByDataset,
   setPhotoArchived,
   restorePhotoArchive,
-  withTransaction,
+  getPhotosByDataset,
   createPruneRun,
   addPruneAction,
   getPruneRunById,
@@ -25,100 +19,15 @@ import {
   listPruneRuns,
 } from "./db.js";
 import {
-  computeFileHash,
-  computeImageMetadata,
-  buildDuplicateGroups,
-  isSupportedImage,
-} from "./duplicateService.js";
+  normalizeRelativePath,
+  normalizeArchiveRoot,
+  collectImageFiles,
+  processImageFile,
+  loadActiveDuplicateGroups,
+  moveFile,
+} from "./scanOps.js";
 
 const program = new Command();
-
-function normalizeRelativePath(rootPath, absolutePath) {
-  const relative = path.relative(rootPath, absolutePath);
-  return relative.split(path.sep).join("/");
-}
-
-function normalizeArchiveRoot(dataset, archiveRoot) {
-  if (archiveRoot) {
-    return path.resolve(archiveRoot);
-  }
-  if (dataset && dataset.archive_root) {
-    return path.resolve(dataset.archive_root);
-  }
-  return null;
-}
-
-// Raw SQLite rows are snake_case; duplicateService and the CLI's formatting
-// work with a plain camelCase shape so they don't need to know about storage.
-function toDuplicateItem(row) {
-  return {
-    id: row.id,
-    relativePath: row.relative_path,
-    absolutePath: row.absolute_path,
-    size: row.size,
-    mtimeMs: row.mtime_ms,
-    sha256: row.sha256,
-    width: row.width,
-    height: row.height,
-    phash: row.phash,
-  };
-}
-
-async function collectImageFiles(rootPath, excludePaths = []) {
-  const files = [];
-  const rootAbs = path.resolve(rootPath);
-  const normalizedExcludes = excludePaths.map((exclude) => path.resolve(exclude));
-
-  async function walk(directory) {
-    const entries = await fs.readdir(directory, { withFileTypes: true });
-    for (const entry of entries) {
-      const entryPath = path.join(directory, entry.name);
-      if (normalizedExcludes.some((exclude) => entryPath === exclude || entryPath.startsWith(`${exclude}${path.sep}`))) {
-        continue;
-      }
-
-      if (entry.isDirectory()) {
-        await walk(entryPath);
-      } else if (entry.isFile() && isSupportedImage(entryPath)) {
-        files.push(entryPath);
-      }
-    }
-  }
-
-  await walk(rootAbs);
-  return files;
-}
-
-async function processImageFile(absolutePath, relativePath, existingByPath, force) {
-  let stats;
-  try {
-    stats = await fs.stat(absolutePath);
-  } catch (error) {
-    return { relativePath, absolutePath, error };
-  }
-
-  const existing = existingByPath.get(relativePath);
-  if (!force && existing && existing.size === stats.size && existing.mtime_ms === stats.mtimeMs) {
-    return { relativePath, absolutePath, unchanged: true, photoId: existing.id };
-  }
-
-  try {
-    const sha256 = await computeFileHash(absolutePath);
-    const metadata = await computeImageMetadata(absolutePath);
-    return {
-      relativePath,
-      absolutePath,
-      size: stats.size,
-      mtimeMs: stats.mtimeMs,
-      sha256,
-      width: metadata.width,
-      height: metadata.height,
-      pHash: metadata.pHash,
-    };
-  } catch (error) {
-    return { relativePath, absolutePath, error };
-  }
-}
 
 // Wires the scan up to whatever control surface the current process
 // (interactive terminal vs. piped/CI) supports. Kept separate from
@@ -239,11 +148,6 @@ function formatGroup(group, index) {
   return lines.join("\n");
 }
 
-function loadActiveDuplicateGroups(db, datasetId) {
-  const rows = getPhotosByDataset(db, datasetId).filter((row) => !row.is_archived);
-  return buildDuplicateGroups(rows.map(toDuplicateItem));
-}
-
 function requireDataset(db, datasetName, dbPath) {
   const dataset = getDataset(db, datasetName);
   if (!dataset) {
@@ -273,24 +177,6 @@ async function showReport(datasetName, options) {
     console.log("");
   });
   closeDatabase(db);
-}
-
-async function ensureDirectoryExists(directory) {
-  await fs.mkdir(directory, { recursive: true });
-}
-
-async function moveFile(source, destination) {
-  await ensureDirectoryExists(path.dirname(destination));
-  try {
-    await fs.rename(source, destination);
-  } catch (error) {
-    if (error.code === "EXDEV") {
-      await fs.copyFile(source, destination);
-      await fs.unlink(source);
-    } else {
-      throw error;
-    }
-  }
 }
 
 async function pruneDataset(datasetName, options) {

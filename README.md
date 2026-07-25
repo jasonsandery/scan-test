@@ -1,11 +1,13 @@
 # Local Photo Duplicate Scanner
 
-A local-first CLI that scans nested folders for photos, tracks file state in
+A local-first tool that scans nested folders for photos, tracks file state in
 SQLite (via Node's built-in `node:sqlite`), finds exact and near-duplicate
 images (same photo resized/re-encoded under a different name), and lets you
-review, archive, and roll back duplicates safely.
+review, archive, and roll back duplicates safely. Usable as a CLI (`src/`) or
+through a local GUI (`server/` + `client/`) - both drive the same scanner
+and the same database file, so you can mix and match.
 
-## Setup
+## CLI setup
 
 ```
 npm install
@@ -63,10 +65,36 @@ One database file can track any number of independently-named datasets
 (different root folders), so you can scan e.g. `family-photos` and
 `phone-backup-2024` separately without them interfering with each other.
 
+## GUI
+
+A local web UI ("Light Table") for browsing datasets, reviewing duplicate
+groups with real thumbnails, and running scans/prune/rollback without the
+command line.
+
+```
+cd server && npm install && npm start        # API on http://127.0.0.1:4100
+cd client && npm install && npm run dev       # UI on http://localhost:5173
+```
+
+Both point at the same `duplicate_state.db` the CLI uses (override with the
+`DUPLICATE_DB` env var on the server). Datasets scanned from the CLI show up
+in the GUI and vice versa.
+
+Reviewing every duplicate group one at a time doesn't scale past a handful -
+the **"Accept all recommended"** button archives every group's
+auto-recommended duplicate in one action; use per-group "Keep this instead"
+first if you want to override a specific recommendation before accepting
+the rest.
+
+The GUI binds to `127.0.0.1` only and has no auth layer - it's meant for
+local use, not for exposing beyond your own machine.
+
 ## Architecture note
 
-`src/scanController.js` drives scans in small concurrent "waves" and exposes
-`pause()` / `resume()` / `stop()` plus `progress`/`status` events, decoupled
-from the CLI. `src/index.js` wires it to terminal keypresses and Ctrl+C, but
-the same controller is meant to be driven by a future HTTP backend (for a
-GUI) without changes.
+`src/scanOps.js` and `src/scanController.js` hold the logic shared by both
+front ends - file walking, hashing, prune/rollback, and a scan engine that
+runs in small concurrent "waves" (each committed as one transaction) with
+`pause()`/`resume()`/`stop()` plus `progress`/`status` events. `src/index.js`
+wires it to terminal keypresses and Ctrl+C; `server/routes.js` wires the same
+controller to HTTP endpoints and an SSE stream for the GUI. Neither front end
+duplicates the other's logic.
