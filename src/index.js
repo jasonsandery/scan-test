@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import readline from "node:readline";
 import { Command } from "commander";
+import { ScanController } from "./scanController.js";
 import {
   initializeDatabase,
   closeDatabase,
@@ -30,8 +32,6 @@ import {
 } from "./duplicateService.js";
 
 const program = new Command();
-const DEFAULT_CONCURRENCY = 8;
-const DEFAULT_BATCH_SIZE = 200;
 
 function normalizeRelativePath(rootPath, absolutePath) {
   const relative = path.relative(rootPath, absolutePath);
@@ -89,26 +89,7 @@ async function collectImageFiles(rootPath, excludePaths = []) {
   return files;
 }
 
-// Runs `worker` over `items` with at most `limit` in flight at once, preserving
-// input order in the returned array. Kept dependency-free since the concurrency
-// need here is simple (no priorities, no cancellation).
-async function runWithConcurrency(items, limit, worker) {
-  const results = new Array(items.length);
-  let cursor = 0;
-
-  async function runNext() {
-    while (cursor < items.length) {
-      const index = cursor++;
-      results[index] = await worker(items[index], index);
-    }
-  }
-
-  const workerCount = Math.max(1, Math.min(limit, items.length));
-  await Promise.all(Array.from({ length: workerCount }, runNext));
-  return results;
-}
-
-async function processImageFile(absolutePath, relativePath, existingByPath) {
+async function processImageFile(absolutePath, relativePath, existingByPath, force) {
   let stats;
   try {
     stats = await fs.stat(absolutePath);
@@ -117,7 +98,7 @@ async function processImageFile(absolutePath, relativePath, existingByPath) {
   }
 
   const existing = existingByPath.get(relativePath);
-  if (existing && existing.size === stats.size && existing.mtime_ms === stats.mtimeMs) {
+  if (!force && existing && existing.size === stats.size && existing.mtime_ms === stats.mtimeMs) {
     return { relativePath, absolutePath, unchanged: true, photoId: existing.id };
   }
 
@@ -139,6 +120,64 @@ async function processImageFile(absolutePath, relativePath, existingByPath) {
   }
 }
 
+// Wires the scan up to whatever control surface the current process
+// (interactive terminal vs. piped/CI) supports. Kept separate from
+// ScanController so a future HTTP backend can drive the same controller from
+// pause/resume/stop endpoints instead of keypresses.
+function registerScanControls(controller) {
+  const isInteractive = Boolean(process.stdin.isTTY);
+
+  const onStatus = (status) => {
+    if (status.state === "completed" || status.state === "stopped") {
+      finish();
+    }
+  };
+
+  const onSigint = () => {
+    if (controller.state === "running" || controller.state === "paused") {
+      console.log("\nStopping after the current batch... (progress so far is saved; Ctrl+C again to force quit)");
+      controller.stop();
+    } else {
+      process.exit(1);
+    }
+  };
+
+  const onKeypress = (str, key) => {
+    if (key && key.ctrl && key.name === "c") {
+      onSigint();
+      return;
+    }
+    if (str === "p") {
+      controller.state === "paused" ? controller.resume() : controller.pause();
+    } else if (str === "s") {
+      controller.stop();
+    }
+  };
+
+  function finish() {
+    if (isInteractive) {
+      process.stdin.off("keypress", onKeypress);
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+    }
+    process.off("SIGINT", onSigint);
+    controller.off("status", onStatus);
+  }
+
+  controller.on("status", onStatus);
+  process.on("SIGINT", onSigint);
+
+  if (isInteractive) {
+    readline.emitKeypressEvents(process.stdin);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on("keypress", onKeypress);
+    console.log("Press [p] to pause/resume, [s] to stop - progress is saved as you go.");
+  } else {
+    console.log("Press Ctrl+C to stop - progress is saved as you go.");
+  }
+}
+
 async function scanDataset(datasetName, rootPath, options) {
   const dbPath = path.resolve(options.db || "duplicate_state.db");
   const rootAbs = path.resolve(rootPath);
@@ -150,44 +189,41 @@ async function scanDataset(datasetName, rootPath, options) {
   const imageFiles = await collectImageFiles(rootAbs, excludeList);
   const existingByPath = new Map(getPhotosByDataset(db, dataset.id).map((row) => [row.relative_path, row]));
 
-  let hashed = 0;
-  let unchanged = 0;
-  let failed = 0;
+  const controller = new ScanController({
+    db,
+    dataset,
+    files: imageFiles,
+    existingByPath,
+    processFile: (absolutePath) =>
+      processImageFile(absolutePath, normalizeRelativePath(rootAbs, absolutePath), existingByPath, options.force),
+  });
 
-  for (let offset = 0; offset < imageFiles.length; offset += DEFAULT_BATCH_SIZE) {
-    const batch = imageFiles.slice(offset, offset + DEFAULT_BATCH_SIZE);
-    const results = await runWithConcurrency(batch, DEFAULT_CONCURRENCY, (absolutePath) =>
-      processImageFile(absolutePath, normalizeRelativePath(rootAbs, absolutePath), existingByPath)
-    );
+  controller.on("fileError", (result) => {
+    process.stdout.write("\n");
+    console.warn(`Skipping unreadable image: ${result.relativePath} (${result.error.message})`);
+  });
 
-    withTransaction(db, () => {
-      const now = new Date().toISOString();
-      for (const result of results) {
-        if (result.error) {
-          failed += 1;
-          console.warn(`\nSkipping unreadable image: ${result.relativePath} (${result.error.message})`);
-          continue;
-        }
-        if (result.unchanged) {
-          touchLastSeen(db, result.photoId, result.absolutePath, now);
-          unchanged += 1;
-          continue;
-        }
-        upsertPhotoRecord(db, dataset.id, { ...result, lastSeenAt: now });
-        hashed += 1;
-      }
-    });
-
-    const processed = Math.min(offset + DEFAULT_BATCH_SIZE, imageFiles.length);
+  controller.on("progress", (status) => {
+    const suffix = status.state === "paused" ? " [paused - press p to resume]" : "...";
     process.stdout.write(
-      `Processed ${processed}/${imageFiles.length} (hashed ${hashed}, unchanged ${unchanged}, failed ${failed})...\r`
+      `Processed ${status.processed}/${status.total} (hashed ${status.hashed}, unchanged ${status.unchanged}, failed ${status.failed})${suffix}\r`
+    );
+  });
+
+  registerScanControls(controller);
+  const finalStatus = await controller.run();
+
+  console.log("");
+  if (finalStatus.state === "stopped") {
+    console.log(
+      `Scan stopped at ${finalStatus.processed}/${finalStatus.total} (${finalStatus.hashed} hashed, ${finalStatus.unchanged} unchanged, ${finalStatus.failed} failed).`
+    );
+    console.log(`Re-run scan for '${datasetName}' to continue - already-processed files are skipped automatically.`);
+  } else {
+    console.log(
+      `Scan complete. ${finalStatus.total} images found for dataset '${datasetName}': ${finalStatus.hashed} hashed, ${finalStatus.unchanged} unchanged, ${finalStatus.failed} failed.`
     );
   }
-
-  setDatasetLastScan(db, dataset.id);
-  console.log(
-    `\nScan complete. ${imageFiles.length} images found for dataset '${datasetName}': ${hashed} hashed, ${unchanged} unchanged, ${failed} failed.`
-  );
   console.log(`Database file: ${dbPath}`);
   console.log(`Archive root: ${archiveRoot}`);
   closeDatabase(db);
@@ -391,6 +427,7 @@ program
   .description("Scan a local folder tree and update state for a named dataset")
   .option("--db <dbPath>", "SQLite database path", "duplicate_state.db")
   .option("--archive <archiveRoot>", "Local archive folder for duplicates")
+  .option("--force", "Re-hash every file, ignoring the unchanged-file skip (a true restart, not a resume)", false)
   .action(async (dataset, rootPath, options) => {
     await scanDataset(dataset, rootPath, options);
   });
