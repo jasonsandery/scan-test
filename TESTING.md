@@ -184,16 +184,43 @@ unchanged.
 **Expected:** duplicate files (not the keeper) move into
 `<root>/duplicates-archive/<relative-path>`; the keeper stays in place;
 the move is recorded as a numbered run.
-**Validated with:** synthetic dataset - verified via `Get-ChildItem`
-before/after that exactly the 2 duplicates moved and the keeper stayed.
+**Validated with:** synthetic dataset via `Get-ChildItem` before/after;
+then for real against the full ~4,900-file real library (a copy, safe to
+mutate) - dry-run first (124 files targeted, filesystem confirmed
+untouched: still 4,904 files afterward), then a real live prune. Verified
+exhaustively: total file count across main tree + archive stayed exactly
+4,904 (nothing lost), archive held exactly 124 files, main tree held
+exactly 4,780, total size unchanged at 13.8 GB, and spot-checked one
+specific keeper/duplicate pair from an earlier screenshot - the keeper
+stayed put, the duplicate moved to the correctly mirrored archive path.
+`report` correctly dropped to 0 duplicate groups afterward (everything
+left is a keeper).
 
 ### 3.4 Rollback restores files to their exact original location
 **Test:** `prune`, then `rollback --run <id>`, check filesystem and `status`.
 **Expected:** files return to their original paths; `status` shows 0
 archived; the run's `pending_actions` drops to 0.
-**Validated with:** synthetic dataset, and separately through the actual
-GUI via Playwright (archived 2 files as run #1, rolled back, screenshots
-confirmed files/UI state fully restored).
+**Validated with:** synthetic dataset; then for real - rolled back the
+124-file live prune above via the CLI, confirmed the main tree returned
+to exactly 4,904 files, archive folder emptied to 0, the same
+keeper/duplicate spot-check pair was back in its original location, and
+`report` returned to 106 duplicate groups. Also validated the archive
+side-effect: rollback left 6 empty leftover directories in the
+now-file-less archive tree (harmless, cosmetic - not cleaned up
+automatically, worth a minor polish item but not a correctness bug).
+Separately validated through the actual GUI via Playwright, twice: once
+against a small seeded synthetic group (archived 2 files as run #1,
+rolled back, screenshots confirmed full restoration), and once against
+the real 106-group/124-file dataset via the real "Accept all recommended"
+and "Roll back" buttons - filesystem ground truth matched exactly (4,904
+main tree / 0 archive) both times. This second real pass also caught and
+fixed a genuine timing bug: the success/restore notice banner was firing
+*before* the group list had actually refetched, so there was a real
+(if brief, ~1.5s) window where the banner said "Restored" while the
+visible group list hadn't updated yet. Fixed in `App.jsx` by awaiting the
+refetch before setting the notice; re-verified by checking the group
+count at the exact instant the banner appears (0 right when "Archived"
+appears, 106 right when "Restored" appears - no more stale window).
 
 ### 3.5 Selective (scoped) prune archives only specified files
 **Test (API/GUI only - CLI always prunes every group):** `POST

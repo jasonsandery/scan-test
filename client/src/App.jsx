@@ -145,8 +145,10 @@ export default function App() {
       if (dryRun) {
         setNotice(`Dry run: would archive ${result.moved.length} file(s).`);
       } else {
-        setNotice(`Archived ${result.moved.length} file(s)${result.runId ? ` as run #${result.runId}` : ""}.`);
+        // Refresh before showing the notice, so "Archived" never appears
+        // while the group list still shows the stale, pre-archive state.
         await Promise.all([refreshDatasets(), loadDatasetDetail(selectedName)]);
+        setNotice(`Archived ${result.moved.length} file(s)${result.runId ? ` as run #${result.runId}` : ""}.`);
       }
     } catch (err) {
       setError(err.message);
@@ -163,8 +165,9 @@ export default function App() {
     setError(null);
     try {
       const result = await api.rollback(selectedName, { runId });
-      setNotice(`Restored ${result.restored.length} file(s) from run #${result.runId}.`);
+      // Refresh before showing the notice, for the same reason as handleArchive.
       await Promise.all([refreshDatasets(), loadDatasetDetail(selectedName)]);
+      setNotice(`Restored ${result.restored.length} file(s) from run #${result.runId}.`);
     } catch (err) {
       setError(err.message);
     } finally {
