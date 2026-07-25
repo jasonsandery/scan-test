@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "photo-scanner": "./src/index.js"
+  },
   "dependencies": {
     "commander": "^11.0.0",
     "jimp": "^1.6.1",
@@ -14,6 +17,10 @@
     "prune": "node src/index.js prune",
     "rollback": "node src/index.js rollback",
     "runs": "node src/index.js runs",
-    "status": "node src/index.js status"
+    "status": "node src/index.js status",
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install",
+    "gui:build": "npm --prefix client run build",
+    "server": "npm --prefix server start",
+    "gui": "npm run gui:build && npm run server"
   }
 }

@@ -1,5 +1,7 @@
+#!/usr/bin/env node
 import path from "node:path";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { ScanController } from "./scanController.js";
 import {
@@ -28,6 +30,14 @@ import {
 } from "./scanOps.js";
 
 const program = new Command();
+
+// Resolved relative to this file's own location (local/src/), not the
+// process's current working directory - so `scan` from any directory (or
+// the GUI server, started from server/) always finds the same database by
+// default, instead of silently creating a new one wherever you happened to
+// launch the process from.
+const PROJECT_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const DEFAULT_DB_PATH = path.join(PROJECT_ROOT, "duplicate_state.db");
 
 function formatDuration(totalSeconds) {
   if (totalSeconds == null || !Number.isFinite(totalSeconds) || totalSeconds < 0) {
@@ -107,7 +117,7 @@ function registerScanControls(controller) {
 }
 
 async function scanDataset(datasetName, rootPath, options) {
-  const dbPath = path.resolve(options.db || "duplicate_state.db");
+  const dbPath = path.resolve(options.db);
   const rootAbs = path.resolve(rootPath);
   const archiveRoot = normalizeArchiveRoot(null, options.archive) || path.join(rootAbs, "duplicates-archive");
   const db = initializeDatabase(dbPath);
@@ -189,7 +199,7 @@ function requireDataset(db, datasetName, dbPath) {
 }
 
 async function showReport(datasetName, options) {
-  const dbPath = path.resolve(options.db || "duplicate_state.db");
+  const dbPath = path.resolve(options.db);
   const db = initializeDatabase(dbPath);
   const dataset = requireDataset(db, datasetName, dbPath);
 
@@ -210,7 +220,7 @@ async function showReport(datasetName, options) {
 }
 
 async function pruneDataset(datasetName, options) {
-  const dbPath = path.resolve(options.db || "duplicate_state.db");
+  const dbPath = path.resolve(options.db);
   const db = initializeDatabase(dbPath);
   const dataset = requireDataset(db, datasetName, dbPath);
 
@@ -252,7 +262,7 @@ async function pruneDataset(datasetName, options) {
 }
 
 async function rollbackDataset(datasetName, options) {
-  const dbPath = path.resolve(options.db || "duplicate_state.db");
+  const dbPath = path.resolve(options.db);
   const db = initializeDatabase(dbPath);
   const dataset = requireDataset(db, datasetName, dbPath);
 
@@ -302,7 +312,7 @@ async function rollbackDataset(datasetName, options) {
 }
 
 async function showPruneRuns(datasetName, options) {
-  const dbPath = path.resolve(options.db || "duplicate_state.db");
+  const dbPath = path.resolve(options.db);
   const db = initializeDatabase(dbPath);
   const dataset = requireDataset(db, datasetName, dbPath);
 
@@ -319,7 +329,7 @@ async function showPruneRuns(datasetName, options) {
 }
 
 async function showStatus(datasetName, options) {
-  const dbPath = path.resolve(options.db || "duplicate_state.db");
+  const dbPath = path.resolve(options.db);
   const db = initializeDatabase(dbPath);
   const dataset = requireDataset(db, datasetName, dbPath);
 
@@ -341,7 +351,7 @@ program
 program
   .command("scan <dataset> <rootPath>")
   .description("Scan a local folder tree and update state for a named dataset")
-  .option("--db <dbPath>", "SQLite database path", "duplicate_state.db")
+  .option("--db <dbPath>", "SQLite database path", DEFAULT_DB_PATH)
   .option("--archive <archiveRoot>", "Local archive folder for duplicates")
   .option("--force", "Re-hash every file, ignoring the unchanged-file skip (a true restart, not a resume)", false)
   .action(async (dataset, rootPath, options) => {
@@ -351,7 +361,7 @@ program
 program
   .command("report <dataset>")
   .description("Show duplicate groups for a dataset")
-  .option("--db <dbPath>", "SQLite database path", "duplicate_state.db")
+  .option("--db <dbPath>", "SQLite database path", DEFAULT_DB_PATH)
   .action(async (dataset, options) => {
     await showReport(dataset, options);
   });
@@ -359,7 +369,7 @@ program
 program
   .command("prune <dataset>")
   .description("Move duplicate files into the archive folder")
-  .option("--db <dbPath>", "SQLite database path", "duplicate_state.db")
+  .option("--db <dbPath>", "SQLite database path", DEFAULT_DB_PATH)
   .option("--archive <archiveRoot>", "Local archive folder for duplicate files")
   .option("--dry-run", "Show what would be moved without changing files", false)
   .action(async (dataset, options) => {
@@ -369,7 +379,7 @@ program
 program
   .command("rollback <dataset>")
   .description("Restore files moved by a previous prune run")
-  .option("--db <dbPath>", "SQLite database path", "duplicate_state.db")
+  .option("--db <dbPath>", "SQLite database path", DEFAULT_DB_PATH)
   .option("--run <runId>", "Prune run id to roll back (defaults to the most recent restorable run)")
   .option("--dry-run", "Show what would be restored without changing files", false)
   .action(async (dataset, options) => {
@@ -379,7 +389,7 @@ program
 program
   .command("runs <dataset>")
   .description("List prune runs for a dataset")
-  .option("--db <dbPath>", "SQLite database path", "duplicate_state.db")
+  .option("--db <dbPath>", "SQLite database path", DEFAULT_DB_PATH)
   .action(async (dataset, options) => {
     await showPruneRuns(dataset, options);
   });
@@ -387,7 +397,7 @@ program
 program
   .command("status <dataset>")
   .description("Show dataset indexing and archive status")
-  .option("--db <dbPath>", "SQLite database path", "duplicate_state.db")
+  .option("--db <dbPath>", "SQLite database path", DEFAULT_DB_PATH)
   .action(async (dataset, options) => {
     await showStatus(dataset, options);
   });

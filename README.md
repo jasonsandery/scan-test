@@ -5,17 +5,41 @@ SQLite (via Node's built-in `node:sqlite`), finds exact and near-duplicate
 images (same photo resized/re-encoded under a different name), and lets you
 review, archive, and roll back duplicates safely. Usable as a CLI (`src/`) or
 through a local GUI (`server/` + `client/`) - both drive the same scanner
-and the same database file, so you can mix and match.
+and the *same database file automatically* (see below), so you can mix and
+match without any setup to keep them in sync.
 
-## CLI setup
+## Setup
 
 ```
-npm install
+npm run install:all
 ```
 
-## Commands
+Installs the CLI, the API server, and the GUI client in one command (each is
+its own small project, but you never need to `cd` into them just to install).
 
-- `npm run scan -- <dataset-name> <root-folder> [--db <database-file>] [--archive <archive-folder>] [--force]`
+## CLI
+
+```
+node src/index.js scan <dataset-name> <root-folder>
+node src/index.js report <dataset-name>
+node src/index.js prune <dataset-name> --dry-run
+node src/index.js prune <dataset-name>
+node src/index.js rollback <dataset-name>
+node src/index.js runs <dataset-name>
+node src/index.js status <dataset-name>
+```
+
+(`npm run scan -- <args>`-style scripts still work if you prefer them, but
+plain `node src/index.js <command>` is one fewer thing to get wrong - no `--`
+to remember.)
+
+Want a shorter command? `npm link` once (from this folder) and use
+`photo-scanner scan ...` etc. from anywhere; `npm uninstall -g photo-scanner`
+removes it again.
+
+Full option reference:
+
+- `scan <dataset-name> <root-folder> [--db <database-file>] [--archive <archive-folder>] [--force]`
 
   Recursively scans `<root-folder>` and records/updates state for the named
   dataset. Re-scans are incremental: files whose size and modified time
@@ -27,26 +51,26 @@ npm install
   so a stopped or interrupted scan never corrupts state — just re-run `scan`
   on the same dataset and it picks up where it left off automatically.
 
-- `npm run report -- <dataset-name> [--db <database-file>]`
+- `report <dataset-name> [--db <database-file>]`
 
   Shows duplicate groups for a dataset without touching any files.
 
-- `npm run prune -- <dataset-name> [--db <database-file>] [--archive <archive-folder>] [--dry-run]`
+- `prune <dataset-name> [--db <database-file>] [--archive <archive-folder>] [--dry-run]`
 
   Moves duplicate files (everything in a group except the highest-quality
   keeper) into an archive folder. `--dry-run` previews the moves without
   touching the filesystem. Every live prune is recorded as a numbered run.
 
-- `npm run rollback -- <dataset-name> [--db <database-file>] [--run <run-id>] [--dry-run]`
+- `rollback <dataset-name> [--db <database-file>] [--run <run-id>] [--dry-run]`
 
   Restores files moved by a previous prune run back to their original
   location (defaults to the most recent run with pending restores).
 
-- `npm run runs -- <dataset-name> [--db <database-file>]`
+- `runs <dataset-name> [--db <database-file>]`
 
   Lists prune run history for a dataset with pending/restored counts.
 
-- `npm run status -- <dataset-name> [--db <database-file>]`
+- `status <dataset-name> [--db <database-file>]`
 
   Quick summary: indexed photo count, archived count, last scan time.
 
@@ -92,13 +116,22 @@ groups with real thumbnails, and running scans/prune/rollback without the
 command line.
 
 ```
-cd server && npm install && npm start        # API on http://127.0.0.1:4100
-cd client && npm install && npm run dev       # UI on http://localhost:5173
+npm run gui
 ```
 
-Both point at the same `duplicate_state.db` the CLI uses (override with the
-`DUPLICATE_DB` env var on the server). Datasets scanned from the CLI show up
-in the GUI and vice versa.
+That's the whole setup: it builds the client and starts the server, which
+serves the built UI itself - one process, one port,
+**http://127.0.0.1:4100**. No separate dev server, no env vars to set. It
+defaults to the exact same `duplicate_state.db` the CLI uses (both resolve
+it relative to this project folder, not wherever you happened to launch
+`node` from - originally an actual bug caught during development), so a
+dataset scanned from the CLI just shows up in the GUI immediately, and vice
+versa - confirmed by running both against the same database at the same
+time.
+
+Actively changing the UI itself? `cd client && npm run dev` runs the Vite
+dev server with hot reload instead (proxies API calls to the server, which
+you still need running separately via `npm run server`).
 
 Reviewing every duplicate group one at a time doesn't scale past a handful -
 the **"Accept all recommended"** button archives every group's

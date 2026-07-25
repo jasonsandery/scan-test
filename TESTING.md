@@ -359,6 +359,56 @@ real corrupted file existing at all.)
   single-user tool; not yet tested that it actually refuses non-loopback
   connections (worth a quick check if this ever runs on a shared machine).
 
+## 6. Setup & defaults (friction removal)
+
+### 6.1 CLI and GUI agree on the database location with zero configuration
+**Test:** start the GUI server, then in a separate terminal run a CLI scan
+from the project root - neither with any env vars/flags set - and check
+the API immediately sees the CLI's data.
+**Expected:** both resolve the same default `duplicate_state.db` path
+(relative to the project folder itself, not whatever directory the
+process happened to be launched from), so they're always in sync without
+being told to be.
+**Validated with:** started the server via `npm run server` (no env
+vars), then ran a full real-library scan via the CLI while the server
+stayed running - `GET /api/datasets` immediately reflected the new
+dataset (4,904 photos, 106 groups) with no restart needed. This also
+incidentally validated concurrent CLI+server access to the same SQLite
+database (WAL mode) causes no errors - previously an untested gap.
+**Regression note:** before this fix, the default was resolved relative
+to `process.cwd()` - fine for the CLI (usually run from the project
+folder) but a real footgun for the server, which is naturally started
+from `server/`, a different directory. This is not hypothetical: it
+caused an actual wrong-database mix-up earlier in development.
+
+### 6.2 One command installs everything
+**Test:** `npm run install:all` from the project root.
+**Expected:** installs the CLI's own dependencies plus `server/` and
+`client/`'s, without needing to `cd` into each one.
+**Validated with:** ran it directly - all three installed cleanly in one
+invocation.
+
+### 6.3 One command builds and serves the whole GUI
+**Test:** `npm run gui` from the project root; load `http://127.0.0.1:4100`
+in a browser (not the Vite dev server's port).
+**Expected:** builds the React client, then starts the API server, which
+also serves the built client directly - one process, one port, no
+separate dev server and no env vars needed for normal use.
+**Validated with:** ran the exact documented command, confirmed
+`GET /` returns the built `index.html`, and loaded it in a real browser
+via Playwright against a real 4,904-photo/106-group dataset - all groups
+rendered, sample thumbnails all loaded successfully, zero console errors.
+`cd client && npm run dev` (the hot-reload dev server, for actively
+working on the UI) was re-confirmed to still work independently.
+
+### 6.4 CLI works both the short way and the old way
+**Test:** `node src/index.js <command> <args>` directly, and the
+previous `npm run <command> -- <args>` style.
+**Expected:** both work identically; the direct form needs no `--`
+separator.
+**Validated with:** ran the same scan/report/prune/rollback/status
+sequence both ways - identical results either way.
+
 ## Toward automation
 
 None of the above runs as `npm test` today - each was a one-off script
