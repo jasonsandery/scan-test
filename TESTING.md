@@ -134,14 +134,16 @@ this case.)
 ### 2.6 Cross-format matching (BMP vs. JPEG/PNG of the same photo)
 **Test:** save the same image as both a JPEG/PNG (decoded via sharp) and
 a BMP (decoded via the Jimp fallback), scan both.
-**Expected:** ideally grouped together, since both decode paths feed the
-same hash function.
-**Validated with:** a synthetic image and its BMP re-save - measured
-distance 14, which is *above* the threshold of 10, so **this specific
-cross-format case is currently a known gap**, not a validated pass (see
-`README.md`: Jimp's and sharp's resize/downsampling algorithms differ
-slightly, adding noise to the hash for this one cross-decoder path).
-Same-decoder comparisons (the vast majority of real files) are unaffected.
+**Expected:** grouped together, since both decode paths feed the same
+hash function.
+**Validated with:** a synthetic image and its BMP re-save. First pass:
+Jimp did its own resize before hashing, and its resize algorithm differs
+slightly from sharp's - measured distance 14, *above* the threshold of
+10 (a real gap, documented as such). Fixed by having Jimp handle only the
+BMP file decode, then piping its raw pixels through the *same* sharp
+resize/grayscale pipeline every other format uses - re-measured distance:
+**0** (identical hash). Re-confirmed distinct photos via the BMP path
+still score far apart (34), so the fix didn't loosen anything.
 
 ### 2.7 Corrupted file still gets exact-duplicate detection
 **Test:** two byte-identical copies of a file that can't be perceptually

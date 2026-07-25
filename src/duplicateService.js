@@ -62,39 +62,36 @@ function dHashFromGrayscale(buffer, width, height) {
   return bytes.toString("hex");
 }
 
-async function computeHashViaSharp(filePath) {
-  const image = sharp(filePath);
-  const metadata = await image.metadata();
-  const gray = await image
-    .clone()
+// Resize/grayscale/raw-extract is the part that actually produces the hash
+// input - keeping it as one shared sharp pipeline (rather than letting Jimp
+// do its own resize for BMP) means hashes stay comparable across formats.
+// Only the initial file decode differs by format; the pixels that get hashed
+// always go through the same downsampling algorithm.
+async function hashHexFromSharpPipeline(sharpInstance) {
+  const gray = await sharpInstance
     .resize(HASH_GRID_WIDTH, HASH_GRID_HEIGHT, { fit: "fill" })
     .grayscale()
     .raw()
     .toBuffer();
-  return {
-    width: metadata.width,
-    height: metadata.height,
-    pHash: `${HASH_VERSION}:${dHashFromGrayscale(gray, HASH_GRID_WIDTH, HASH_GRID_HEIGHT)}`,
-  };
+  return dHashFromGrayscale(gray, HASH_GRID_WIDTH, HASH_GRID_HEIGHT);
 }
 
-// BMP only - sharp cannot decode BMP at all.
+async function computeHashViaSharp(filePath) {
+  const image = sharp(filePath);
+  const metadata = await image.metadata();
+  const hashHex = await hashHexFromSharpPipeline(image.clone());
+  return { width: metadata.width, height: metadata.height, pHash: `${HASH_VERSION}:${hashHex}` };
+}
+
+// BMP only - sharp cannot decode BMP at all. Jimp handles just the file
+// decode; its raw RGBA pixels are then handed to the same sharp pipeline
+// every other format uses, so BMP doesn't pick up decoder-specific resize
+// differences that would otherwise throw off cross-format comparisons.
 async function computeHashViaJimp(filePath) {
   const image = await Jimp.read(filePath);
-  const width = image.bitmap.width;
-  const height = image.bitmap.height;
-  const resized = image.clone().resize({ w: HASH_GRID_WIDTH, h: HASH_GRID_HEIGHT }).greyscale();
-
-  const gray = Buffer.alloc(HASH_GRID_WIDTH * HASH_GRID_HEIGHT);
-  for (let i = 0; i < gray.length; i += 1) {
-    gray[i] = resized.bitmap.data[i * 4]; // RGBA -> R (R=G=B post-greyscale)
-  }
-
-  return {
-    width,
-    height,
-    pHash: `${HASH_VERSION}:${dHashFromGrayscale(gray, HASH_GRID_WIDTH, HASH_GRID_HEIGHT)}`,
-  };
+  const { width, height, data } = image.bitmap; // RGBA
+  const hashHex = await hashHexFromSharpPipeline(sharp(data, { raw: { width, height, channels: 4 } }));
+  return { width, height, pHash: `${HASH_VERSION}:${hashHex}` };
 }
 
 export async function computeImageMetadata(filePath) {
