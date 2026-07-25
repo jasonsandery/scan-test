@@ -109,6 +109,41 @@ the rest.
 The GUI binds to `127.0.0.1` only and has no auth layer - it's meant for
 local use, not for exposing beyond your own machine.
 
+## Roadmap: burst/similar-photo clustering (not built yet)
+
+Verified (see "same filename, different content" test below): the current
+near-duplicate threshold correctly does *not* flag genuinely different
+photos as duplicates, even when they share a filename - real distinct
+photos scored a hamming distance of 23-37+ against a threshold of 10, a
+wide margin. That's deliberate: today's detector is tuned to catch "the
+same photo, re-encoded/resized," and rejecting anything else is a feature,
+not a gap.
+
+Burst-mode shots (or several photos of the same moment a few seconds
+apart) are a genuinely different problem - they're different captures, not
+copies of the same one, so they'll always sit above that threshold and
+correctly won't be touched by prune. But a user thinning out a library
+often *does* want help there too: "here are 8 near-identical shots from
+the same 3 seconds, pick your favorite(s)." That's a distinct feature,
+not a threshold tweak, because:
+
+- It needs a much looser similarity band, which alone would produce false
+  positives against genuinely different photos - it has to be combined
+  with a second, independent signal: time proximity (EXIF capture
+  timestamp, which nothing here reads yet, and/or file mtime) and likely
+  same source folder.
+- The action on a cluster isn't "keep the best, archive the rest"
+  automatically - unlike a re-encoded duplicate, there's no objective
+  "better" copy (resolution/file size don't tell you which framing or
+  expression is best). The right UX is presenting the cluster for the
+  human to pick from, not an auto-recommendation to accept.
+- It would need its own calibration and validation pass against real
+  photos, the same way the current near-dup threshold was, before trusting
+  it with real libraries.
+
+Not implemented. Flagging it here so it's a deliberate decision, not a
+forgotten gap.
+
 ## Architecture note
 
 `src/scanOps.js` and `src/scanController.js` hold the logic shared by both
