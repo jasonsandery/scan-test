@@ -109,7 +109,13 @@ the rest.
 The GUI binds to `127.0.0.1` only and has no auth layer - it's meant for
 local use, not for exposing beyond your own machine.
 
-## Roadmap: burst/similar-photo clustering (not built yet)
+## Roadmap (not built yet)
+
+None of the items below are implemented. Each is flagged here as a
+deliberate scope decision, not a forgotten gap - and a couple of them
+share a prerequisite worth doing once rather than twice.
+
+### Burst/similar-photo clustering
 
 Verified (see "same filename, different content" test below): the current
 near-duplicate threshold correctly does *not* flag genuinely different
@@ -141,8 +147,60 @@ not a threshold tweak, because:
   photos, the same way the current near-dup threshold was, before trusting
   it with real libraries.
 
-Not implemented. Flagging it here so it's a deliberate decision, not a
-forgotten gap.
+### Metadata-based grouping (capture date, location)
+
+Right now the app reads zero EXIF metadata - only filesystem size/mtime
+and pixel content. File mtime is a poor stand-in for when a photo was
+actually taken (it reflects when it was last copied/synced, not
+captured), so grouping "photos from this trip" or "photos from this day"
+needs the real EXIF `DateTimeOriginal` and GPS tags, which needs a new
+EXIF-reading dependency (sharp's `.metadata()` exposes the raw EXIF
+buffer today but nothing parses it yet).
+
+This is a different *kind* of feature than everything else in this repo -
+it's for browsing/organizing a library, not cleaning it up - so it likely
+wants its own view rather than folding into duplicate-group cards. It's
+also the same missing prerequisite (EXIF timestamp reading) that
+burst-clustering's time-proximity signal needs, so it's worth building
+once and using in both places rather than twice.
+
+### Corrupted/unreadable file report
+
+Partially there already: the scanner now tracks exactly which files
+couldn't be perceptually hashed (`noPerceptualHashCount` in the dataset
+API, a per-file warning during scan) - see the "GUI" section above. What's
+missing is surfacing it as its own view. Today, a corrupted file only
+becomes visible in the GUI if it happens to be part of a duplicate group
+(via an exact SHA256 match); the common case - a corrupted file that
+isn't a duplicate of anything - is counted but never listed anywhere. A
+dedicated endpoint/panel listing every such file (with its decode error)
+would make "831 files might be damaged, here they are" actually
+actionable instead of just a number.
+
+### Junk/low-value image detection
+
+Different problem from corruption: technically valid, readable images
+that aren't really "photos" - web thumbnails, app icons, cached preview
+images, screenshots-of-screenshots that ended up synced into a photo
+library. None of these are duplicates of each other, so the current
+detector has no opinion on them. Plausible heuristics: very small pixel
+dimensions, suspicious aspect ratios, or (once EXIF reading exists for
+the metadata-grouping feature above) the *absence* of camera EXIF data,
+which is itself a decent signal that something isn't a real camera photo.
+
+### Video files
+
+Currently completely out of scope - `supportedExtensions` is images
+only, so video files are invisible to the folder walk, not skipped-with-a-
+warning like an unreadable image would be. Exact-duplicate detection
+would extend trivially (SHA256 is already format-agnostic). Near-duplicate
+detection is a materially harder problem than for photos, though: "the
+same video re-encoded" could be approximated by hashing a representative
+extracted frame the same way a photo is hashed, but that needs a new
+dependency (something like ffmpeg) to extract frames at all, sharp/Jimp
+don't decode video containers, and it wouldn't catch trimmed/edited
+variants of the same footage - a materially different, harder problem
+than "the same image at a different resolution."
 
 ## Architecture note
 

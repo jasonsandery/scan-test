@@ -82,6 +82,12 @@ export default function App() {
           if (selectedNameRef.current === datasetName) {
             loadDatasetDetail(datasetName);
           }
+          if (status.warned > 0) {
+            setNotice(
+              `Scan ${status.state}: ${status.warned} file(s) were indexed but couldn't be perceptually hashed ` +
+                `(likely corrupted) - still checked for exact duplicates, just not near-duplicates.`
+            );
+          }
         }
       };
 
@@ -104,7 +110,15 @@ export default function App() {
       const result = await api.startScan(name, rootPath ? { rootPath } : {});
       await refreshDatasets();
       setSelectedName(name);
-      attachJob(name, result.jobId, { state: "running", processed: 0, total: result.total, hashed: 0, unchanged: 0, failed: 0 });
+      attachJob(name, result.jobId, {
+        state: "running",
+        processed: 0,
+        total: result.total,
+        hashed: 0,
+        unchanged: 0,
+        failed: 0,
+        warned: 0,
+      });
     } catch (err) {
       setError(err.message);
     }

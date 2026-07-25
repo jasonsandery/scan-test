@@ -19,7 +19,8 @@ export default function ScanFooter({ job, onPause, onResume, onStop }) {
       </div>
       <span className="scan-counts">
         {status.processed.toLocaleString()} / {status.total.toLocaleString()} · {status.hashed} hashed ·{" "}
-        {status.unchanged} unchanged · {status.failed} failed
+        {status.unchanged} unchanged
+        {status.warned > 0 ? ` · ${status.warned} no preview` : ""} · {status.failed} failed
       </span>
       <div style={{ display: "flex", gap: 6 }}>
         {isPaused ? (

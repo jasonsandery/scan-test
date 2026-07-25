@@ -57,6 +57,9 @@ function summarizeDataset(db, dataset) {
     archivedCount: photos.filter((p) => p.is_archived).length,
     duplicateGroupCount: activeGroups.length,
     reclaimableBytes,
+    // Indexed (has a SHA256, so exact-duplicate detection still works) but
+    // couldn't be perceptually hashed - commonly a corrupted/truncated file.
+    noPerceptualHashCount: photos.filter((p) => p.sha256 && !p.phash).length,
     activeJobId: activeJob ? activeJob.jobId : null,
     activeJobState: activeJob ? activeJob.controller.state : null,
   };
@@ -286,6 +289,7 @@ export function createRouter(db) {
       }
       res.set("Content-Type", result.contentType);
       res.set("Cache-Control", "public, max-age=3600");
+      res.set("X-Thumbnail-Placeholder", String(result.placeholder));
       res.send(result.buffer);
     } catch (error) {
       console.error(`Thumbnail render failed for photo ${req.params.id}:`, error.message);

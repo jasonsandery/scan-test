@@ -120,7 +120,7 @@ async function scanDataset(datasetName, rootPath, options) {
   controller.on("progress", (status) => {
     const suffix = status.state === "paused" ? " [paused - press p to resume]" : "...";
     process.stdout.write(
-      `Processed ${status.processed}/${status.total} (hashed ${status.hashed}, unchanged ${status.unchanged}, failed ${status.failed})${suffix}\r`
+      `Processed ${status.processed}/${status.total} (hashed ${status.hashed}, unchanged ${status.unchanged}, warned ${status.warned}, failed ${status.failed})${suffix}\r`
     );
   });
 
@@ -130,12 +130,12 @@ async function scanDataset(datasetName, rootPath, options) {
   console.log("");
   if (finalStatus.state === "stopped") {
     console.log(
-      `Scan stopped at ${finalStatus.processed}/${finalStatus.total} (${finalStatus.hashed} hashed, ${finalStatus.unchanged} unchanged, ${finalStatus.failed} failed).`
+      `Scan stopped at ${finalStatus.processed}/${finalStatus.total} (${finalStatus.hashed} hashed, ${finalStatus.unchanged} unchanged, ${finalStatus.warned} warned, ${finalStatus.failed} failed).`
     );
     console.log(`Re-run scan for '${datasetName}' to continue - already-processed files are skipped automatically.`);
   } else {
     console.log(
-      `Scan complete. ${finalStatus.total} images found for dataset '${datasetName}': ${finalStatus.hashed} hashed, ${finalStatus.unchanged} unchanged, ${finalStatus.failed} failed.`
+      `Scan complete. ${finalStatus.total} images found for dataset '${datasetName}': ${finalStatus.hashed} hashed, ${finalStatus.unchanged} unchanged, ${finalStatus.warned} warned (indexed but not perceptually hashed), ${finalStatus.failed} failed.`
     );
   }
   console.log(`Database file: ${dbPath}`);

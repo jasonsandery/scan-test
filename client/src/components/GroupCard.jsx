@@ -1,9 +1,10 @@
 import { formatBytes, formatDimensions } from "../format.js";
 
 function Mount({ item, isKeep, onKeepInstead, busy }) {
+  const hasNoPreview = !item.width || !item.height;
   return (
     <div className="mount">
-      <div className="swatch">
+      <div className={`swatch${hasNoPreview ? " swatch-no-preview" : ""}`}>
         <img src={item.thumbnailUrl} alt="" loading="lazy" />
         <span className={`mark ${isKeep ? "mark-keep" : "mark-reject"}`}>{isKeep ? "✓" : "✕"}</span>
       </div>
@@ -11,6 +12,9 @@ function Mount({ item, isKeep, onKeepInstead, busy }) {
       <div className="mount-meta">
         {formatDimensions(item)} · {formatBytes(item.size)}
       </div>
+      {hasNoPreview && (
+        <span className="mount-tag mount-tag-warning">couldn't be hashed - likely corrupted</span>
+      )}
       {isKeep ? (
         <span className="mount-tag">keeping</span>
       ) : (

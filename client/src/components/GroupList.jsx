@@ -51,6 +51,14 @@ export default function GroupList({ dataset, groups, onArchive, busy }) {
         </div>
       </div>
 
+      {dataset.noPerceptualHashCount > 0 && (
+        <div className="dataset-callout">
+          {dataset.noPerceptualHashCount.toLocaleString()} file(s) in this dataset couldn't be perceptually
+          hashed (commonly a corrupted/truncated file) - they're still indexed and checked for exact
+          duplicates, just not near-duplicates, and show a "no preview" thumbnail below.
+        </div>
+      )}
+
       <div className="section-head">
         <h2>Duplicate groups · {dataset.name}</h2>
         {visibleGroups.length > 0 && (

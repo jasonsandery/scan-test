@@ -23,7 +23,7 @@ export class ScanController extends EventEmitter {
     this.processFile = processFile;
     this.waveSize = waveSize;
     this.cursor = 0;
-    this.counts = { hashed: 0, unchanged: 0, failed: 0 };
+    this.counts = { hashed: 0, unchanged: 0, failed: 0, warned: 0 };
     this.state = "idle"; // idle | running | paused | stopping | stopped | completed
     this._stopRequested = false;
     this._resumeWaiter = null;
@@ -41,6 +41,7 @@ export class ScanController extends EventEmitter {
       hashed: this.counts.hashed,
       unchanged: this.counts.unchanged,
       failed: this.counts.failed,
+      warned: this.counts.warned,
     };
   }
 
@@ -128,6 +129,7 @@ export class ScanController extends EventEmitter {
             // Recorded successfully (exact-duplicate detection still works
             // via its SHA256) but couldn't be perceptually hashed - commonly
             // a genuinely corrupted/truncated image file.
+            this.counts.warned += 1;
             this.emit("fileWarning", result);
           }
         }

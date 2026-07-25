@@ -266,6 +266,36 @@ there's no endpoint that accepts an arbitrary filesystem path.
 **Validated with:** curl against a real photo id (200, JPEG bytes) and id
 `9999` (404).
 
+### 4.5 A file that can't be perceptually hashed still gets a valid thumbnail
+**Test:** request `/api/photos/:id/thumbnail` for a photo with no phash
+(a genuinely corrupted file); load it in the GUI.
+**Expected:** the endpoint returns a 200 with a placeholder JPEG (never a
+500), tagged with an `X-Thumbnail-Placeholder: true` header; in the
+browser, the `<img>` loads successfully (not a broken-image icon) and
+the swatch gets a distinct dashed-border treatment plus a "couldn't be
+hashed" tag.
+**Validated with:** curl against a real corrupted file's photo id (200,
+valid JPEG, header present, viewed the actual placeholder image); then
+end-to-end via Playwright against a seeded duplicate group of two
+corrupted files - screenshot confirmed the dashed border, warning tag,
+and dataset-level callout ("2 file(s) in this dataset couldn't be
+perceptually hashed...") all render correctly, and the placeholder
+`<img>` loads successfully (`naturalWidth: 240, complete: true`).
+
+### 4.6 GUI renders correctly at real scale
+**Test:** load the real ~4,900-photo / 106-group dataset in the browser.
+**Expected:** all groups render, all thumbnails load (none broken),
+"Accept all recommended" shows the correct total count, scrolling stays
+responsive, no console errors or failed requests.
+**Validated with:** Playwright against the actual real-world dataset -
+106/106 groups rendered, 230 `<img>` elements in the DOM with 0 broken
+(`complete && naturalWidth === 0`), "Accept all recommended (124)"
+matched the real duplicate count, full scroll-through took ~3s with no
+errors. (Note: none of these 106 real groups happened to contain a
+no-preview/corrupted file - that path is validated separately in 4.5,
+since a real corrupted file being duplicated is inherently rarer than a
+real corrupted file existing at all.)
+
 ## 5. Safety boundaries (things the app deliberately does NOT do)
 
 - **Never deletes** - `prune` always moves to a recoverable archive
